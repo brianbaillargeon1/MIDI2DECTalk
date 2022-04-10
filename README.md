@@ -35,19 +35,19 @@ Move it into the same directory as this project (E.g. into the MIDI2DECTalk dire
 
 In the input directory, produce:
 1. A plain text file called Lyrics.txt containing some lyrics.
-2. A MIDI file containing a single track, with one note per vowel phoneme.
+2. A MIDI file containing a single track, with one note per vowel phoneme in the lyrics.
 
 On the command line, run MIDI2DECTalk:
 ```
 python3 MIDI2DECTalk.py
 ```
 
-It will prompt you for the tempo, and then generate output/Output.spk
+You will be prompted for the tempo, and then it will generate output/Output.spk
 
 
 # Configuration
 
-In MIDI2DECTalk.py, review the CONFIGURATION section; edit as necessary.
+In MIDI2DECTalk.py, review the CONFIGURATION section, and edit as necessary.
 
 # Disclaimer
 
