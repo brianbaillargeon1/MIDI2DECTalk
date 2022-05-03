@@ -10,18 +10,23 @@
 import math
 import MIDI
 import sys
+import os
 
 
 # ==== CONFIGURATION ====
 
-# Location of the file containing natural language words to be converted to phonemes
-NATURAL_LANGUAGE_INPUT_FILE = "input/Lyrics.txt"
+# Location of input files
+INPUT_DIRECTORY = "input"
 
-# Location of the MIDI file that the phonemes will sync to
-MIDI_INPUT_FILE = "input/Melody.mid"
+# Name of the file containing lyrics to be converted to phonemes
+LYRICS_INPUT_FILENAME = "Lyrics.txt"
+
+# Name of the MIDI file that the phonemes will sync to
+MIDI_INPUT_FILE = "Melody.mid"
 
 # Location of the output file
-OUTPUT_FILE = "output/Output.spk"
+OUTPUT_DIRECTORY = "output"
+OUTPUT_FILENAME = "Output.spk"
 
 # Default duration of consonant phonemes in milliseconds
 DEFAULT_CONSONANT_DURATION = 90
@@ -224,7 +229,7 @@ def parsePhonemes(phonemes: str) -> [[str]]:
 					# A single consonant between vowels: [hx, eh] *l* [ow, ...]"
 					# Individual consonants tend to start syllables: [hx, eh], [l, oh, ...]
 					parsed.append(syllablePhonemes[:-1])
-					syllablePhonemes = syllablePhonemes[-1]
+					syllablePhonemes = [syllablePhonemes[-1]]
 				else:
 					# Suitable for the majority of words (cases like "firstly", "helpful"):
 					# Put ceil(consonants/2) on the first syllable, and floor(consonants/2) on the second syllable
@@ -347,15 +352,16 @@ tempo = float(tempoStr)
 # TODO: add support to read tempo meta messages.
 
 
-# Convert natural language into DECTalk phonemes:
+# Convert lyrics into DECTalk phonemes:
 # TODO: Exception handling
-textFile = open(NATURAL_LANGUAGE_INPUT_FILE, 'r')
-naturalLanguage = textFile.read()
+lyricsFilePath = os.path.join(INPUT_DIRECTORY, LYRICS_INPUT_FILENAME)
+textFile = open(lyricsFilePath, 'r')
+lyrics = textFile.read()
 textFile.close()
 
 from subprocess import Popen, PIPE
 # TODO: Exception handling
-process = Popen([PYTHON3, "lexconvert.py", "--phones", "dectalk", naturalLanguage], stdout=PIPE)
+process = Popen([PYTHON3, "lexconvert.py", "--phones", "dectalk", lyrics], stdout=PIPE)
 (lexConvertOutput, err) = process.communicate()
 exit_code = process.wait()
 
@@ -375,7 +381,8 @@ parsedSyllables = parsePhonemes(phonemes)
 
 # Read the MIDI file, and parse the MIDI track whose events will be iterated
 # TODO: Exception handling
-midiIn = MIDI.MIDIFile(MIDI_INPUT_FILE)
+midiFilePath = os.path.join(INPUT_DIRECTORY, MIDI_INPUT_FILE)
+midiIn = MIDI.MIDIFile(midiFilePath)
 midiIn.parse()
 
 # Ticks per beat of the BPM
@@ -460,7 +467,10 @@ for event in track:
 output += ']'
 
 # Let's write the output file now
-outputFile = open(OUTPUT_FILE, "w")
+if not os.path.exists(OUTPUT_DIRECTORY):
+	os.makedirs(OUTPUT_DIRECTORY)
+outputPath = os.path.join(OUTPUT_DIRECTORY, OUTPUT_FILENAME)
+outputFile = open(outputPath, "w")
 outputFile.write(output)
 # TODO: call a cleanup method to close all the files
 outputFile.close()
