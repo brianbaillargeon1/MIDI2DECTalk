@@ -9,11 +9,18 @@
 
 import math
 import MIDI
-import sys
 import os
+import sys
+import time
 
 
 # ==== CONFIGURATION ====
+
+# Set to True to print debug information to STDOUT
+DEBUG = False
+
+# Pauses the program for this many seconds if there's an error
+PAUSE_ON_ERROR_DURATION = 0
 
 # Location of input files
 INPUT_DIRECTORY = "input"
@@ -51,9 +58,6 @@ TRACK_NUMBER = 0
 # The Python executable to invoke lexconvert.py.
 # Default: the executable that invoked this program.
 PYTHON3 = sys.executable
-
-# Set to True to print debug information to STDOUT
-DEBUG = False
 
 
 # ==== CONSTANTS ====
@@ -93,6 +97,8 @@ def info(message: str):
 
 def error(message: str):
 	print(message, file=sys.stderr)
+	if PAUSE_ON_ERROR_DURATION:
+		time.sleep(PAUSE_ON_ERROR_DURATION)
 
 def splitMatchAsTuple(phonemes: str, possibleMatches: [str], matchApostrophe: bool) -> (str, str):
 	"""
@@ -437,6 +443,10 @@ for event in track:
 		if not firstNoteTicks:
 			firstNoteTicks = event.time
 
+		if nextSyllableIndex >= len(parsedSyllables):
+			error("There are more MIDI notes than syllables; output might be truncated")
+			break
+
 		eventTimeMillis = getEventTimeMillis(event, tempo, ticksPerBeat, firstNoteTicks)
 
 		if sustainedEntity:
@@ -461,7 +471,10 @@ for event in track:
 			sustainedEntity = REST
 			startOfSustain += duration
 
-# TODO: add handling if there are still more syllables
+if nextSyllableIndex < len(parsedSyllables):
+	error("There are more syllables than MIDI notes; output might be truncated")
+	error("Remaining syllables: " + str(parsedSyllables[nextSyllableIndex:]))
+
 # TODO: warn if the MIDI track ended with a lingering NOTE_ON (I.e. without a corresponding NOTE_OFF)
 
 output += ']'
