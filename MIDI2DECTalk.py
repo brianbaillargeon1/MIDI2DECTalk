@@ -59,13 +59,18 @@ TRACK_NUMBER = 0
 # Default: the executable that invoked this program.
 PYTHON3 = sys.executable
 
+# Whether to treat NOTE_ON with velocity 0 as NOTE_OFF
+VEL_ZERO_IS_NOTE_OFF = False
+
+# Whether NOTE_OFF events should be handled regardless of whether their pitch corresponds to a sustained NOTE_ON event
+IGNORE_NOTE_OFF_PITCH = True
 
 # ==== CONSTANTS ====
 
 # Categorization of "dectalk" dictionary in lexconvert.py into vowels and consonants.
 # The order is important to prevent ambiguity. I.e. 'lx' comes before 'l', 'rx' comes before 'r', etc.
 # lexconvert.py includes 'ihr', but explains that it parses to 'ih', and 'r'; I have omitted it.
-VOWELS = ['aa', 'ae', 'ah', 'ao', 'aw', 'ax', 'ay', 'eh', 'el', 'ey', 'ih', 'ix', 'iy', 'ow', 'oy', 'rr', 'uh', 'uw', 'yx']
+VOWELS = ['aa', 'ae', 'ah', 'ao', 'aw', 'ax', 'ay', 'eh', 'el', 'ey', 'ih', 'ix', 'iy', 'ow', 'oy', 'rr', 'uh', 'uw', 'yx', 'yu']
 
 CONSONANTS = ['b', 'ch', 'dx', 'dh', 'd', 'f', 'g', 'hx', 'q', 'jh', 'k', 'lx', 'l', 'm', 'nx', 'n', 'p', 'rx', 'r', 'sh', 's', 'tx', 'th', 't', 'v', 'w', 'zh', 'z']
 
@@ -83,7 +88,7 @@ MIDI_DECTALK_PITCH_DELTA = 35
 # For identifying the MIDI event types.
 UNUSED = -1
 NOTE_ON = 144
-NOTE_OFF = 128
+NOTE_OFF = 80
 
 
 # ==== FUNCTIONS ====
@@ -261,7 +266,7 @@ def getEventType(event) -> int:
 	NOTE_ON with velocity 0 returns NOTE_OFF.
 	Returns NOTE_ON, NOTE_OFF, or UNUSED
 	"""
-	if event.header == NOTE_ON and event.message.velocity == 0:
+	if VEL_ZERO_IS_NOTE_OFF and event.header == NOTE_ON and event.message.velocity == 0:
 		return NOTE_OFF
 	elif event.header in (NOTE_OFF, NOTE_ON):
 		return event.header
@@ -392,7 +397,7 @@ midiIn = MIDI.MIDIFile(midiFilePath)
 midiIn.parse()
 
 # Ticks per beat of the BPM
-ticksPerBeat = float(midiIn.division)
+ticksPerBeat = float(midiIn.division.ticksPerCrotchet)
 debug("Ticks per beat: " + str(ticksPerBeat))
 
 if TRACK_NUMBER == 0 and len(midiIn) > 1:
@@ -460,8 +465,8 @@ for event in track:
 			startOfSustain += duration
 
 		sustainedEntity = event.message.note
-	elif eventType == NOTE_OFF:
-		if sustainedEntity.note == event.message.note.note and sustainedEntity.octave == event.message.note.octave:
+	elif eventType == NOTE_OFF and sustainedEntity:
+		if IGNORE_NOTE_OFF_PITCH or (sustainedEntity.note == event.message.note.note and sustainedEntity.octave == event.message.note.octave):
 			# This NOTE_OFF event ends sustainedEntity. Write the entity, then begin a rest.
 			eventTimeMillis = getEventTimeMillis(event, tempo, ticksPerBeat, firstNoteTicks)
 			duration = round(eventTimeMillis - startOfSustain, 0)

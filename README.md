@@ -51,7 +51,12 @@ In MIDI2DECTalk.py, review the CONFIGURATION section, and edit as necessary.
 
 # Disclaimer
 
-I do not own any DECTalk technology (I'm just a music & technology geek!). A friend exposed the difficulties of creating .spk files manually and requested this program; the problem piqued my interest. If you encounter any issues, please report them.
+I do not own any DECTalk technology (I'm just a music & technology geek!). A friend exposed the difficulties of creating .spk files manually and requested this program; the problem piqued my interest. Initial development was completed without a test environment. If you encounter any issues, please report them.
+
+# Testing
+
+The following environment can be used for testing:
+https://tts.cyzon.us/ (https://github.com/calzoneman/aeiou)
 
 # Questions / Suggestions / Issues
 
