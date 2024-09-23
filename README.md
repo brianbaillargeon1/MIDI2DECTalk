@@ -15,19 +15,39 @@ To download this repository from GitHub, go to Code > Download ZIP, then extract
 2\. Download and install Python 3:
 https://www.python.org/downloads/
 
-3\. Once python is installed, use Python's pip tool to install the MIDIFile module from the command line:
+Windows: after installation, it's recommended to add Python to your PATH environment variable:
+https://www.geeksforgeeks.org/how-to-add-python-to-windows-path/
+
+3\. Optional, but recommended: Once python is installed, create a virtual environment.
+When a virtual environment is activated, the python dependencies you install are local to the project you're working against. This prevents dependency conflicts if your system already uses python.
+Details: [venv](https://docs.python.org/3/library/venv.html)
+
+For instance, on Linux / Mac:
 ```
-pip3 install MIDIFile
-```
-Note: if you have py-midi installed, it can conflict. If you encounter issues, remove py-midi with:
-```
-pip3 uninstall py-midi
+cd /path/to/extracted/MIDI2DECTalk
+python -m venv .
 ```
 
-4\. Download and setup eSpeak:
+Then activate the project before you install any dependencies, or before running the project:
+```
+source ./bin/activate
+```
+When you're finished installing dependencies / running the project, and you wish to return to a normal command line, just type:
+deactivate
+
+See the above link for Windows instructions.
+
+We're about to install dependencies, so go ahead and activate the virtual environment now.
+
+4\. Use Python's pip tool to install the MIDIFile module from the command line:
+```
+pip install MIDIFile
+```
+
+5\. Download and setup eSpeak:
 http://espeak.sourceforge.net/download.html
 
-5\. Download [lexconvert.py](https://github.com/ssb22/lexconvert/raw/master/lexconvert.py) ([documentation](https://ssb22.user.srcf.net/gradint/lexconvert.html)).
+6\. Download [lexconvert.py](https://github.com/ssb22/lexconvert/raw/master/lexconvert.py) ([documentation](https://ssb22.user.srcf.net/gradint/lexconvert.html)).
 Move it into the same directory as this project (E.g. into the MIDI2DECTalk directory created when you extracted the zip file).
 
 
@@ -37,9 +57,9 @@ In the input directory, produce:
 1. A plain text file called Lyrics.txt containing some lyrics.
 2. A MIDI file containing a single track, with one note per vowel phoneme in the lyrics.
 
-On the command line, run MIDI2DECTalk:
+On the command line, if using a virtual environment (recommended), activate it. Then run MIDI2DECTalk:
 ```
-python3 MIDI2DECTalk.py
+python MIDI2DECTalk.py
 ```
 
 You will be prompted for the tempo, and then it will generate output/Output.spk
