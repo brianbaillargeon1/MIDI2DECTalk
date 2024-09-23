@@ -18,11 +18,11 @@ https://www.python.org/downloads/
 Windows: after installation, it's recommended to add Python to your PATH environment variable:
 https://www.geeksforgeeks.org/how-to-add-python-to-windows-path/
 
-3\. Optional, but recommended: Once python is installed, create a virtual environment.
+3\. Optional, but recommended: Once python is installed, create a [virtual environment](https://docs.python.org/3/library/venv.html).
 When a virtual environment is activated, the python dependencies you install are local to the project you're working against. This prevents dependency conflicts if your system already uses python.
-Details: [venv](https://docs.python.org/3/library/venv.html)
+See Python's [documentation](https://docs.python.org/3/library/venv.html) on virtual environments for details.
 
-For instance, on Linux / Mac:
+For instance, to create a virtual environment for the project on Linux / Mac:
 ```
 cd /path/to/extracted/MIDI2DECTalk
 python -m venv .
@@ -33,9 +33,11 @@ Then activate the project before you install any dependencies, or before running
 source ./bin/activate
 ```
 When you're finished installing dependencies / running the project, and you wish to return to a normal command line, just type:
+```
 deactivate
+```
 
-See the above link for Windows instructions.
+See the above documentation link for Windows instructions.
 
 We're about to install dependencies, so go ahead and activate the virtual environment now.
 
