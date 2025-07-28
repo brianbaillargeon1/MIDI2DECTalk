@@ -26,7 +26,7 @@ from types import SimpleNamespace
 # ==== CONFIGURATION ====
 
 # Set to True to print debug information to STDOUT
-DEBUG = True
+DEBUG = False
 
 # Pauses the program for this many seconds if there's an error
 PAUSE_ON_ERROR_DURATION = 0
