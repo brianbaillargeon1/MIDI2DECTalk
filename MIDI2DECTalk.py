@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+"""
+Main program; for details, see README.md
+"""
+
 # ==== DEPENDENCIES ====
 
 # https://pypi.org/project/MIDIFile/
@@ -8,16 +12,21 @@
 # lexconvert.py and eSpeak, see README.md
 
 import math
-import MIDI
+import MIDI # type: ignore
 import os
 import sys
 import time
+from subprocess import Popen, PIPE
+from typing import NamedTuple
+from typing import NewType
+from typing import Optional
+from types import SimpleNamespace
 
 
 # ==== CONFIGURATION ====
 
 # Set to True to print debug information to STDOUT
-DEBUG = False
+DEBUG = True
 
 # Pauses the program for this many seconds if there's an error
 PAUSE_ON_ERROR_DURATION = 0
@@ -39,7 +48,7 @@ OUTPUT_FILENAME = "Output.spk"
 DEFAULT_CONSONANT_DURATION = 90
 
 # Set this for consonant phonemes that sound better with a duration other than the default
-CONSONANT_DURATIONS = {}
+CONSONANT_DURATIONS: dict[str, int] = {}
 # Example: CONSONANT_DURATIONS = {'g':85, 'wr':95}
 
 # Translates phonemes produced by lexconvert.py into phonemes supported by the targeted DECTalk capable technology.
@@ -54,10 +63,6 @@ WRITE_PHONEME_ON = False
 
 # Track number in the MIDI file to use
 TRACK_NUMBER = 0
-
-# The Python executable to invoke lexconvert.py.
-# Default: the executable that invoked this program.
-PYTHON3 = sys.executable
 
 # Whether to treat NOTE_ON with velocity 0 as NOTE_OFF
 VEL_ZERO_IS_NOTE_OFF = False
@@ -77,11 +82,6 @@ CONSONANTS = ['b', 'ch', 'dx', 'dh', 'd', 'f', 'g', 'hx', 'q', 'jh', 'k', 'lx', 
 # Phoneme representing silence
 REST = '_'
 
-# Values representing types of matches while parsing phonemes:
-CATEGORY_VOWEL = 'V'
-CATEGORY_CONSONANT = 'C'
-CATEGORY_COMMA = ','
-
 # A440 in MIDI: 69, A440 in DECTalk: 34. Their difference: 35
 MIDI_DECTALK_PITCH_DELTA = 35
 
@@ -91,176 +91,199 @@ NOTE_ON = 144
 NOTE_OFF = 80
 
 
+# ==== TYPES ====
+
+Category = SimpleNamespace()
+Category.vowel = 'V'
+Category.consonant = 'C'
+Category.comma = ','
+
+
+class Phoneme(NamedTuple):
+	"""
+	Represents a phoneme, and its category. E.g. Phoneme('hx', 'C') is the 'hx' phoneme, categorized as a consonant
+	"""
+	phoneme: str
+	category: str
+
+class CategoryMatch(NamedTuple):
+	"""
+	A type used for parsing and categorizing phonemes
+	"""
+	phoneme: Phoneme
+	remainder: str
+
+# Represents a list a Phonemes containing exactly one vowel
+Syllable = NewType('Syllable', list[Phoneme])
+
 # ==== FUNCTIONS ====
 
 def debug(message: str):
+	""" Prints a message if DEBUG is enabled """
 	if DEBUG:
 		print(message)
 
 def info(message: str):
+	""" Prints a message """
 	print(message)
 
 def error(message: str):
+	""" Prints a message to stderr """
 	print(message, file=sys.stderr)
 	if PAUSE_ON_ERROR_DURATION:
 		time.sleep(PAUSE_ON_ERROR_DURATION)
 
-def splitMatchAsTuple(phonemes: str, possibleMatches: [str], matchApostrophe: bool) -> (str, str):
+def split_on_category_match(phonemes: str, category: str, category_tokens: list[str], match_apostrophe: bool) -> Optional[CategoryMatch]:
 	"""
-	Checks if phonemes starts with a token in the possibleMatches list
+	Checks if phonemes starts with a token in the category list
 	Params:
-	phonemes: an str like 'hxehl'ow, w'rrld'
-	possibleMatches: one of the constant lists VOWELS or CONSONANTS
-	matchApostrophe: whether or not matching tokens might be prefixed with an apostrophe
+	phonemes: an str like 'hxehl'ow, w'rrld'.
+	category: represents the category we're attempting to split on, E.g. Category.vowels, Category.consonants.
+	category_tokens: the list of possible tokens in the category, E.g. one of the constant lists VOWELS or CONSONANTS.
+	match_apostrophe: whether or not matching tokens might be prefixed with an apostrophe.
 
 	Returns:
 	A tuple: (matching phoneme, phoneme list with the match removed)
 	E.g. ("hx", "ehl'ow, w'rrld")
-	If no possibleMatches match, returns None
+	If no category match, returns None
 	"""
 
 	remainder = phonemes
-	matched = False
 	match = ''
-	if matchApostrophe and phonemes[0] == '\'':
+
+	if match_apostrophe and phonemes[0] == '\'':
 		match = '\''
 		remainder = phonemes[1:]
-	for token in possibleMatches:
+
+	for token in category_tokens:
 		if remainder.startswith(token):
-			matched = True
 			match = match + token
 			remainder = remainder[len(token):]
-			break
-	if matched:
-		return (match, remainder)
+			phoneme = Phoneme(match, category)
+			return CategoryMatch(phoneme, remainder)
 	return None
 
-def categorizePhonemes(phonemes: str) -> [(str, str)]:
+def categorize_phonemes(phonemes: str) -> list[Phoneme]:
 	"""
 	Parses phonemes, and categorizes them into vowels, constants, and commas
 	(commas represent word endings).
 	Params:
-	phonemes: an str like 'hxehl'ow, w'rrld'
+	phonemes: an str like 'hxehl'ow, w'rrld'.
 
 	Returns
-	a list of tuples: [(phoneme, category)],
-	where the category is one of the constants: CATEGORY_VOWEL, CATEGORY_CONSONANT, or CATEGORY_COMMA
+	a list of Phonemes whose category is one of the constants: Category.vowel, Category.consonant, or Category.comma.
 	"""
 
-	toParse = phonemes
-	categorizedPhonemes = []
-	matchFound = True
+	unparsed = phonemes
+	categorized_phonemes = []
+	category_match = None
 
-	while matchFound and toParse:
-		splitAsTuple = splitMatchAsTuple(toParse, VOWELS, True)
-		if splitAsTuple:
-			categorizedPhonemes.append((splitAsTuple[0], CATEGORY_VOWEL))
-			toParse = splitAsTuple[1]
-			continue
-		splitAsTuple = splitMatchAsTuple(toParse, CONSONANTS, False)
-		if splitAsTuple:
-			categorizedPhonemes.append((splitAsTuple[0], CATEGORY_CONSONANT))
-			toParse = splitAsTuple[1]
-			continue
-		splitAsTuple = splitMatchAsTuple(toParse, [", "], False)
-		if splitAsTuple:
-			categorizedPhonemes.append((splitAsTuple[0], CATEGORY_COMMA))
-			toParse = splitAsTuple[1]
-			continue
-		matchFound = False
-	if not matchFound:
-		error("Error parsing phonemes; could not find a match at the start of: " + toParse)
-	return categorizedPhonemes
+	while unparsed:
+		category_match = split_on_category_match(unparsed, Category.vowel, VOWELS, True)
+		if not category_match:
+			category_match = split_on_category_match(unparsed, Category.consonant, CONSONANTS, False)
+		if not category_match:
+			category_match = split_on_category_match(unparsed, Category.comma, [", "], False)
 
-def parsePhonemes(phonemes: str) -> [[str]]:
+		if category_match:
+			categorized_phonemes.append(category_match.phoneme)
+			unparsed = category_match.remainder
+		else:
+			error("Error parsing phonemes; could not find a match at the start of: " + unparsed)
+			break
+
+	return categorized_phonemes
+
+def parse_phonemes(phonemes: str) -> list[Syllable]:
 	"""
 	Parses the param 'phonemes', an str like 'hxehl'ow, w'rrld',
-	and returns a nested list that groups these phonemes into syllables.
+	and returns a list of Syllables.
 	We define a syllable as a group of phonemes containing exactly one vowel.
 	For example, with input hxehl'ow, w'rrld, we would return:
 	[['hx', 'eh'], ['l', '\'ow'], ['w', '\'rr', 'l', 'd']]
 	"""
 
-	# Return value (outer list)
-	parsed = []
-	# Current syllable's phonemes (inner list)
-	syllablePhonemes = []
+	# Return value
+	parsed: list[Syllable] = []
+	# Buffer for a syllable as it's being parsed in the loop below
+	syllable_phonemes: list[Phoneme] = []
 
-	categorizedPhonemes = categorizePhonemes(phonemes)
-	debug("Token List:\n" + str(categorizedPhonemes))
+	categorized_phonemes = categorize_phonemes(phonemes)
+	debug("Categorized Phonemes:\n" + str(categorized_phonemes))
 
-	# Iterate over the categorizedPhonemes and buffer them into syllablePhonemes.
+	# Iterate over the categorized_phonemes and buffer them into syllable_phonemes.
 	# We've completed a syllable when we've reached one of the following conditions:
 	# 1) we've hit a comma (I.e. the end of a word)
-	# 2) syllablePhonemes contains a vowel, and we're about to read a second vowel
-	# 3) the end of categorizedPhonemes has been reached
+	# 2) syllable_phonemes contains a vowel, and we're about to read a second vowel
+	# 3) the end of categorized_phonemes has been reached
 
-	consonantsBetweenVowels = 0
-	vowelPresent = False
-	for categorizedPhoneme in categorizedPhonemes:
-		if categorizedPhoneme[1] == CATEGORY_COMMA:
-			# Word endings are syllable endings
-			if (syllablePhonemes):
-				parsed.append(syllablePhonemes)
-			consonantsBetweenVowels = 0
-			vowelPresent = False
-			syllablePhonemes = []
+	consonants_between_vowels = 0
+	vowel_present = False
+	for phoneme in categorized_phonemes:
+		match phoneme.category:
+			case Category.comma:
+				# Word endings are syllable endings
+				if syllable_phonemes:
+					parsed.append(Syllable(syllable_phonemes))
+				consonants_between_vowels = 0
+				vowel_present = False
+				syllable_phonemes = []
 
-		elif categorizedPhoneme[1] == CATEGORY_CONSONANT:
-			syllablePhonemes.append(categorizedPhoneme)
-			consonantsBetweenVowels+=1
+			case Category.consonant:
+				syllable_phonemes.append(phoneme)
+				consonants_between_vowels+=1
 
-		elif categorizedPhoneme[1] == CATEGORY_VOWEL:
-			if vowelPresent:
-				# We have encountered a second vowel; start a new syllable
+			case Category.vowel:
+				if vowel_present:
+					# We have encountered a second vowel; start a new syllable
 
-				# Obervations about when phonemes sound when singing:
-				# If there's a single consonant between vowels, the consonant tends to start the second syllable.
-				# E.g. [hx, eh, l, 'ow] -> [hx, eh] [l, 'ow]
+					# Obervations about when phonemes sound when singing:
+					# If there's a single consonant between vowels, the consonant tends to start the second syllable.
+					# E.g. [hx, eh, l, 'ow] -> [hx, eh] [l, 'ow]
 
-				# However, if there's an odd number of consonants between vowels,
-				# they tend to cluster at the end of the first syllable.
-				# "firstly", -> [f, rr]  *[s, t, l]* [ih, ...]    -> [f, 'rr, s, t], [l, ih]
-				# "helpful"  -> [hx, eh] *[l, p, f]* [uh, l, ...] -> [hx, 'eh, l, p], [f, uh, l]
-				# But there are counterexamples
-				# E.g. "Fulcrum" should ideally become: [f, ah, l] [k, r, ax, m]
+					# However, if there's an odd number of consonants between vowels,
+					# they tend to cluster at the end of the first syllable.
+					# "firstly", -> [f, rr]  *[s, t, l]* [ih, ...]    -> [f, 'rr, s, t], [l, ih]
+					# "helpful"  -> [hx, eh] *[l, p, f]* [uh, l, ...] -> [hx, 'eh, l, p], [f, uh, l]
+					# But there are counterexamples
+					# E.g. "Fulcrum" should ideally become: [f, ah, l] [k, r, ax, m]
 
-				# Note: lexconvert has some syllable separating capabilities, E.g. this exists:
-				# python3 lexconvert.py --syllables "Fulcrum"
-				# But the output is "fulc rum".
-				# I considered using a dictionary file containing words with delimiters between syllables,
-				# but splitting words into syllables before calling lexconvert would ruin pronunciations.
-				# Calling lexconvert, then attempting to map english syllables to the converted phonemes is imperfect as well.
+					# Note: lexconvert has some syllable separating capabilities, E.g. this exists:
+					# python3 lexconvert.py --syllables "Fulcrum"
+					# But the output is "fulc rum".
+					# I considered using a dictionary file containing words with delimiters between syllables,
+					# but splitting words into syllables before calling lexconvert would ruin pronunciations.
+					# Calling lexconvert, then attempting to map english syllables to the converted phonemes is imperfect as well.
 
-				if consonantsBetweenVowels == 0:
-					# Two consecutive vowels, start a new syllable 
-					parsed.append(syllablePhonemes)
-					syllablePhonemes = []
-				elif consonantsBetweenVowels == 1:
-					# A single consonant between vowels: [hx, eh] *l* [ow, ...]"
-					# Individual consonants tend to start syllables: [hx, eh], [l, oh, ...]
-					parsed.append(syllablePhonemes[:-1])
-					syllablePhonemes = [syllablePhonemes[-1]]
-				else:
-					# Suitable for the majority of words (cases like "firstly", "helpful"):
-					# Put ceil(consonants/2) on the first syllable, and floor(consonants/2) on the second syllable
-					numSecondWordConsonants = math.floor(consonantsBetweenVowels/2)
-					secondWordConsonants = syllablePhonemes[-numSecondWordConsonants:]
-					parsed.append(syllablePhonemes[:-numSecondWordConsonants])
-					syllablePhonemes = secondWordConsonants
+					if consonants_between_vowels == 0:
+						# Two consecutive vowels, start a new syllable
+						parsed.append(Syllable(syllable_phonemes))
+						syllable_phonemes = []
+					elif consonants_between_vowels == 1:
+						# A single consonant between vowels: [hx, eh] *l* [ow, ...]"
+						# Individual consonants tend to start syllables: [hx, eh], [l, oh, ...]
+						parsed.append(Syllable(syllable_phonemes[:-1]))
+						syllable_phonemes = [syllable_phonemes[-1]]
+					else:
+						# Suitable for the majority of words (cases like "firstly", "helpful"):
+						# Put ceil(consonants/2) on the first syllable, and floor(consonants/2) on the second syllable
+						num_second_word_consonants = math.floor(consonants_between_vowels/2)
+						second_word_consonants = syllable_phonemes[-num_second_word_consonants:]
+						parsed.append(Syllable(syllable_phonemes[:-num_second_word_consonants]))
+						syllable_phonemes = second_word_consonants
 
-			syllablePhonemes.append(categorizedPhoneme)
-			vowelPresent = True
-			consonantsBetweenVowels = 0
+				syllable_phonemes.append(phoneme)
+				vowel_present = True
+				consonants_between_vowels = 0
 
-	if syllablePhonemes:
-		parsed.append(syllablePhonemes)
+	if syllable_phonemes:
+		parsed.append(Syllable(syllable_phonemes))
 
 	debug("Parsed:\n" + str(parsed))
 
 	return parsed
 
-def getEventType(event) -> int:
+def get_event_type(event) -> int:
 	"""
 	Gets a MIDI event's effective event type.
 	NOTE_ON with velocity 0 returns NOTE_OFF.
@@ -268,11 +291,13 @@ def getEventType(event) -> int:
 	"""
 	if VEL_ZERO_IS_NOTE_OFF and event.header == NOTE_ON and event.message.velocity == 0:
 		return NOTE_OFF
-	elif event.header in (NOTE_OFF, NOTE_ON):
+
+	if event.header in (NOTE_OFF, NOTE_ON):
 		return event.header
+
 	return UNUSED
 
-def getMidiPitch(note: MIDI.Events.messages.notes.Note) -> int:
+def calculate_midi_pitch(note: MIDI.Events.messages.notes.Note) -> int:
 	""" Takes a Note instance and gets its MIDI pitch number (E.g. A440 returns 69) """
 	# Consider A440:
 	# It is represented as 'a5'; its MIDI pitch is #69
@@ -280,33 +305,33 @@ def getMidiPitch(note: MIDI.Events.messages.notes.Note) -> int:
 	notes = MIDI.Events.messages.notes.Note.notes
 	return note.octave*12 + notes.index(note.note)
 
-def getDECTalkPitch(note: MIDI.Events.messages.notes.Note) -> int:
+def calculate_dectalk_pitch(note: MIDI.Events.messages.notes.Note) -> int:
 	""" Takes a Note instance and gets its DECTalk pitch number (E.g. A440 returns 34) """
-	return getMidiPitch(note) - MIDI_DECTALK_PITCH_DELTA
+	return calculate_midi_pitch(note) - MIDI_DECTALK_PITCH_DELTA
 
-def getEventTimeMillis(event: MIDI.Events.event.Event, tempo, ticksPerBeat, firstNoteTicks) -> float:
+def get_event_time_millis(event: MIDI.Events.event.Event, tempo, ticks_per_beat, first_note_ticks) -> float:
 	"""
 	Takes a MIDI event and returns its time in milliseconds
 	event: MIDI Event
 	tempo: beats per minute
-	ticksPerBeat: how many MIDI ticks per beat
-	firstNoteTicks: how many MIDI ticks elapsed before the first note
+	ticks_per_beat: how many MIDI ticks per beat
+	first_note_ticks: how many MIDI ticks elapsed before the first note
 	"""
-	timeInTicks = event.time
-	if firstNoteTicks:
-		timeInTicks -= firstNoteTicks
+	time_in_ticks = event.time
+	if first_note_ticks:
+		time_in_ticks -= first_note_ticks
 	# beats = ticks / (ticks / beats)
-	beatsElapsed = timeInTicks / ticksPerBeat
+	beats_elapsed = time_in_ticks / ticks_per_beat
 	# milliseconds = beats / (beats / minute) * (60 seconds / minute) * (1000 ms / second)
-	return 60000 * beatsElapsed / tempo
+	return 60000 * beats_elapsed / tempo
 
-def getConvertedPhoneme(phoneme: str) -> str:
+def get_converted_phoneme(phoneme: str) -> str:
 	""" Translates phonemes produced by lexconvert.py to phonemes supported by the targeted technology """
 	if phoneme in PHONEME_CONVERSION:
 		return PHONEME_CONVERSION[phoneme]
 	return phoneme
 
-def getConsonantDuration(consonant: str) -> int:
+def get_consonant_duration(consonant: str) -> int:
 	"""
 	Checks for a mapping for this consonant in CONSONANT_DURATIONS.
 	Returns the default consonant duration if no mapping is specified.
@@ -316,7 +341,7 @@ def getConsonantDuration(consonant: str) -> int:
 		return CONSONANT_DURATIONS[key]
 	return DEFAULT_CONSONANT_DURATION
 
-def translateSyllableToDECTalk(syllable: [(str, str)], note: MIDI.Events.messages.notes.Note, duration: int) -> str:
+def translate_syllable_to_dectalk(syllable: Syllable, note: MIDI.Events.messages.notes.Note, duration: int) -> str:
 	"""
 	Translates a syllable into the output format.
 	Example syllable: [('w', 'c'), ('\'rr', 'v'), ('l', 'c'), ('d', 'c')]
@@ -324,172 +349,189 @@ def translateSyllableToDECTalk(syllable: [(str, str)], note: MIDI.Events.message
 	w<90>'rr<230,34>ll<90>d<90>
 	"""
 
-	outputText = ""
+	output_text = ""
 
-	totalConsonantDuration = 0
-	for categorizedPhoneme in syllable:
-		if categorizedPhoneme[1] == CATEGORY_CONSONANT:
-			convertedPhoneme = getConvertedPhoneme(categorizedPhoneme[0])
-			totalConsonantDuration += getConsonantDuration(convertedPhoneme)
+	total_consonant_duration = 0
+	for phoneme in syllable:
+		if phoneme.category == Category.consonant:
+			converted_phoneme = get_converted_phoneme(phoneme.phoneme)
+			total_consonant_duration += get_consonant_duration(converted_phoneme)
 
-	vowelDuration = duration - totalConsonantDuration
-	if vowelDuration < 0:
+	vowel_duration = duration - total_consonant_duration
+	if vowel_duration < 0:
 		error("Could not fit all the phonemes within " + str(duration) + " milliseconds.")
 		error("Consider reducing DEFAULT_CONSONANT_DURATION, or ensure your MIDI notes are sufficiently long.")
 		#TODO: Call a cleanup method to close all the files
-		exit()
+		sys.exit()
 
-	for categorizedPhoneme in syllable:
-		convertedPhoneme = getConvertedPhoneme(categorizedPhoneme[0])
-		if categorizedPhoneme[1] == CATEGORY_CONSONANT:
-			consonantDuration = getConsonantDuration(convertedPhoneme)
-			outputText += '{}<{}>'.format(convertedPhoneme, str(int(consonantDuration)))
-		elif categorizedPhoneme[1] == CATEGORY_VOWEL:
-			outputText += '{}<{},{}>'.format(convertedPhoneme, str(int(vowelDuration)), str(getDECTalkPitch(note)))
+	for phoneme in syllable:
+		converted_phoneme = get_converted_phoneme(phoneme.phoneme)
+		if phoneme.category == Category.consonant:
+			consonant_duration = int(get_consonant_duration(converted_phoneme))
+			output_text += f"{converted_phoneme}<{consonant_duration}>"
+		elif phoneme.category == Category.vowel:
+			duration = int(vowel_duration)
+			dectalk_pitch = calculate_dectalk_pitch(note)
+			output_text += f"{converted_phoneme}<{duration},{dectalk_pitch}>"
 
-	return outputText
+	return output_text
 
-def getDECTalkRest(duration: int) -> str:
+def get_dectalk_rest(duration: int) -> str:
 	""" Gets a rest for the specified duration in the output format """
 	return REST + '<' + str(int(duration)) + '>'
 
 
-# ==== MAIN PROGRAM ====
+# pylint: disable=R0912,R0914,R0915
+def main():
+	"""
+	Main Program
+	"""
 
-# Get the BPM
-tempoStr = input("What's the BPM? ")
-# Precise sync'ing may be needed. Support decimals - use float.
-tempo = float(tempoStr)
-# TODO: add support to read tempo meta messages.
-
-
-# Convert lyrics into DECTalk phonemes:
-# TODO: Exception handling
-lyricsFilePath = os.path.join(INPUT_DIRECTORY, LYRICS_INPUT_FILENAME)
-textFile = open(lyricsFilePath, 'r')
-lyrics = textFile.read()
-textFile.close()
-
-from subprocess import Popen, PIPE
-# TODO: Exception handling
-process = Popen([PYTHON3, "lexconvert.py", "--phones", "dectalk", lyrics], stdout=PIPE)
-(lexConvertOutput, err) = process.communicate()
-exit_code = process.wait()
-
-# Clean up output, and unify the delimiters between words as commas
-phonemes = lexConvertOutput.decode('UTF-8')
-phonemes = phonemes.replace("[:phoneme on]\n[", "", 1)
-phonemes = phonemes.replace("] [", ", ")
-phonemes = phonemes.replace("]\n[", ", ")
-phonemes = phonemes.replace("]", "")
-phonemes = phonemes.replace("\n", "")
-debug("Phonemes:\n" + str(phonemes))
+	# Get the BPM
+	tempo = float(input("What's the BPM? "))
+	# Precise sync'ing may be needed. Support decimals - use float.
+	# TODO: add support to read tempo meta messages.
 
 
-# Convert the phonemes into a list of syllables
-parsedSyllables = parsePhonemes(phonemes)
+	# Convert lyrics into DECTalk phonemes:
+	# TODO: Exception handling
+	lyrics = ""
+	lyrics_file_path = os.path.join(INPUT_DIRECTORY, LYRICS_INPUT_FILENAME)
+	with open(lyrics_file_path, 'r', encoding='utf-8') as lyrics_file:
+		lyrics = lyrics_file.read()
+
+	# TODO: Exception handling
+	lex_convert_output = None
+	with Popen(["lexconvert", "--phones", "dectalk", lyrics], stdout=PIPE) as process:
+		(lex_convert_output, err) = process.communicate()
+		if err:
+			error(f"lexconvert error: {err}")
+
+		exit_code = process.wait()
+		if exit_code != 0:
+			error(f"lexconvert exit code: {exit_code}")
+
+	# Clean up output, and unify the delimiters between words as commas
+	lex_convert_phonemes = lex_convert_output.decode('UTF-8')
+	lex_convert_phonemes = lex_convert_phonemes.replace("[:phoneme on]\n[", "", 1)
+	lex_convert_phonemes = lex_convert_phonemes.replace("] [", ", ")
+	lex_convert_phonemes = lex_convert_phonemes.replace("]\n[", ", ")
+	lex_convert_phonemes = lex_convert_phonemes.replace("]", "")
+	lex_convert_phonemes = lex_convert_phonemes.replace("\n", "")
+	debug("Phonemes:\n" + str(lex_convert_phonemes))
 
 
-# Read the MIDI file, and parse the MIDI track whose events will be iterated
-# TODO: Exception handling
-midiFilePath = os.path.join(INPUT_DIRECTORY, MIDI_INPUT_FILE)
-midiIn = MIDI.MIDIFile(midiFilePath)
-midiIn.parse()
-
-# Ticks per beat of the BPM
-ticksPerBeat = float(midiIn.division.ticksPerCrotchet)
-debug("Ticks per beat: " + str(ticksPerBeat))
-
-if TRACK_NUMBER == 0 and len(midiIn) > 1:
-	info("Multiple tracks detected; only the first track will be used")
-elif TRACK_NUMBER >= len(midiIn):
-	error("The configured TRACK_NUMBER exceeds the highest track number in the MIDI file")
-	# TODO: cleanup
-	exit()
-
-track = midiIn[TRACK_NUMBER]
-track.parse()
+	# Convert the phonemes into a list of syllables
+	parsed_syllables = parse_phonemes(lex_convert_phonemes)
 
 
-# The output file's contents
-output = ""
-if WRITE_PHONEME_ON:
-	output += "[:phoneme on]\n"
-output += "["
+	# Read the MIDI file, and parse the MIDI track whose events will be iterated
+	# TODO: Exception handling
+	midi_file_path = os.path.join(INPUT_DIRECTORY, MIDI_INPUT_FILE)
+	midi_in = MIDI.MIDIFile(midi_file_path)
+	midi_in.parse()
+
+	# Ticks per beat of the BPM
+	ticks_per_beat = float(midi_in.division.ticksPerCrotchet)
+	debug("Ticks per beat: " + str(ticks_per_beat))
+
+	if TRACK_NUMBER == 0 and len(midi_in) > 1:
+		info("Multiple tracks detected; only the first track will be used")
+	elif TRACK_NUMBER >= len(midi_in):
+		error("The configured TRACK_NUMBER exceeds the highest track number in the MIDI file")
+		# TODO: cleanup
+		sys.exit()
+
+	track = midi_in[TRACK_NUMBER]
+	track.parse()
 
 
-# High level idea:
-# Iterate over the MIDI Events.
-# Every NOTE_ON starts a new syllable,
-# and it sustains until the next NOTE_ON or its corresponding NOTE_OFF.
+	# The output file's contents
+	output = ""
+	if WRITE_PHONEME_ON:
+		output += "[:phoneme on]\n"
+	output += "["
 
-# To iterate through the syllables; increments each time we output a note.
-nextSyllableIndex = 0
 
-# It's common for the first note in a MIDI file to be delayed by a number of ticks.
-# We'd rather not start the output file with a leading rest.
-# Once the first note's time is detected, all timing will be shifted earlier this many ticks.
-# This way, the output begins immediately.
-firstNoteTicks = None
+	# High level idea:
+	# Iterate over the MIDI Events.
+	# Every NOTE_ON starts a new syllable,
+	# and it sustains until the next NOTE_ON or its corresponding NOTE_OFF.
 
-# As we iterate through MIDI events, this is the entity that has last started sustaining.
-# Its value can be REST, or a MIDI.Events.messages.notes.Note
-sustainedEntity = None
-# The time in milliseconds that sustainedEntity begins sustaining in the output file.
-# This is the sum of the durations that have been output so far.
-startOfSustain = 0
+	# To iterate through the syllables; increments each time we output a note.
+	next_syllable_index = 0
 
-for event in track:
-	eventType = getEventType(event)
+	# It's common for the first note in a MIDI file to be delayed by a number of ticks.
+	# We'd rather not start the output file with a leading rest.
+	# Once the first note's time is detected, all timing will be shifted earlier this many ticks.
+	# This way, the output begins immediately.
+	first_note_ticks = None
 
-	# TODO: handle if event type is either NOTE_ON or NOTE_OFF, but there are no more syllables (I.e. add some 'ooh yeahs')
+	# As we iterate through MIDI events, this is the entity that has last started sustaining.
+	# Its value can be REST, or a MIDI.Events.messages.notes.Note
+	sustained_entity = None
+	# The time in milliseconds that sustained_entity begins sustaining in the output file.
+	# This is the sum of the durations that have been output so far.
+	start_of_sustain = 0
 
-	if eventType == NOTE_ON:
-		if not firstNoteTicks:
-			firstNoteTicks = event.time
+	for event in track:
+		event_type = get_event_type(event)
 
-		if nextSyllableIndex >= len(parsedSyllables):
-			error("There are more MIDI notes than syllables; output might be truncated")
-			break
+		# TODO: handle if event type is either NOTE_ON or NOTE_OFF, but there are no more syllables (I.e. add some 'ooh yeahs')
 
-		eventTimeMillis = getEventTimeMillis(event, tempo, ticksPerBeat, firstNoteTicks)
+		if event_type == NOTE_ON:
+			if not first_note_ticks:
+				first_note_ticks = event.time
 
-		if sustainedEntity:
-			# Output the sustained entity, then start sustaining the new one
-			duration = round(eventTimeMillis - startOfSustain, 0)
-			if sustainedEntity == REST:
-				output += getDECTalkRest(duration)
-			else:
-				output += translateSyllableToDECTalk(parsedSyllables[nextSyllableIndex], sustainedEntity, duration)
-				nextSyllableIndex += 1
-			startOfSustain += duration
+			if next_syllable_index >= len(parsed_syllables):
+				error("There are more MIDI notes than syllables; output might be truncated")
+				break
 
-		sustainedEntity = event.message.note
-	elif eventType == NOTE_OFF and sustainedEntity:
-		if IGNORE_NOTE_OFF_PITCH or (sustainedEntity.note == event.message.note.note and sustainedEntity.octave == event.message.note.octave):
-			# This NOTE_OFF event ends sustainedEntity. Write the entity, then begin a rest.
-			eventTimeMillis = getEventTimeMillis(event, tempo, ticksPerBeat, firstNoteTicks)
-			duration = round(eventTimeMillis - startOfSustain, 0)
-			output += translateSyllableToDECTalk(parsedSyllables[nextSyllableIndex], sustainedEntity, duration)
-			nextSyllableIndex += 1
+			event_time_millis = get_event_time_millis(event, tempo, ticks_per_beat, first_note_ticks)
 
-			sustainedEntity = REST
-			startOfSustain += duration
+			if sustained_entity:
+				# Output the sustained entity, then start sustaining the new one
+				duration = round(event_time_millis - start_of_sustain, 0)
+				if sustained_entity == REST:
+					syllable = get_dectalk_rest(duration)
+					output += syllable
+					debug(f"Syllable {syllable}")
+				else:
+					syllable = translate_syllable_to_dectalk(parsed_syllables[next_syllable_index], sustained_entity, duration)
+					output += syllable
+					debug(f"Syllable {syllable}")
+					next_syllable_index += 1
+				start_of_sustain += duration
 
-if nextSyllableIndex < len(parsedSyllables):
-	error("There are more syllables than MIDI notes; output might be truncated")
-	error("Remaining syllables: " + str(parsedSyllables[nextSyllableIndex:]))
+			sustained_entity = event.message.note
+		elif event_type == NOTE_OFF and sustained_entity:
+			if IGNORE_NOTE_OFF_PITCH or (sustained_entity.note == event.message.note.note and sustained_entity.octave == event.message.note.octave):
+				# This NOTE_OFF event ends sustained_entity. Write the entity, then begin a rest.
+				event_time_millis = get_event_time_millis(event, tempo, ticks_per_beat, first_note_ticks)
+				duration = int(round(event_time_millis - start_of_sustain, 0))
+				syllable = translate_syllable_to_dectalk(parsed_syllables[next_syllable_index], sustained_entity, duration)
+				debug(f"Syllable {syllable}")
+				output += syllable
+				next_syllable_index += 1
 
-# TODO: warn if the MIDI track ended with a lingering NOTE_ON (I.e. without a corresponding NOTE_OFF)
+				sustained_entity = REST
+				start_of_sustain += duration
 
-output += ']'
+	if next_syllable_index < len(parsed_syllables):
+		error("There are more syllables than MIDI notes; output might be truncated")
+		error("Remaining syllables: " + str(parsed_syllables[next_syllable_index:]))
+		error("TODO: This is likely due to the absence of a note off")
 
-# Let's write the output file now
-if not os.path.exists(OUTPUT_DIRECTORY):
-	os.makedirs(OUTPUT_DIRECTORY)
-outputPath = os.path.join(OUTPUT_DIRECTORY, OUTPUT_FILENAME)
-outputFile = open(outputPath, "w")
-outputFile.write(output)
-# TODO: call a cleanup method to close all the files
-outputFile.close()
+	# TODO: warn if the MIDI track ended with a lingering NOTE_ON (I.e. without a corresponding NOTE_OFF)
 
+	output += ']'
+
+	# Let's write the output file now
+	if not os.path.exists(OUTPUT_DIRECTORY):
+		os.makedirs(OUTPUT_DIRECTORY)
+	output_path = os.path.join(OUTPUT_DIRECTORY, OUTPUT_FILENAME)
+	with open(output_path, "w", encoding="utf-8") as output_file:
+		output_file.write(output)
+
+
+main()

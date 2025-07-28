@@ -1,0 +1,13 @@
+astroid==3.2.4
+dill==0.4.0
+isort==5.13.2
+lexconvert==0.43
+mccabe==0.7.0
+MIDIFile==0.2.0
+mypy==1.14.1
+mypy_extensions==1.1.0
+platformdirs==4.3.6
+pylint==3.2.7
+tomli==2.2.1
+tomlkit==0.13.3
+typing_extensions==4.13.2

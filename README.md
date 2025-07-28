@@ -41,16 +41,15 @@ See the above documentation link for Windows instructions.
 
 We're about to install dependencies, so go ahead and activate the virtual environment now.
 
-4\. Use Python's pip tool to install the MIDIFile module from the command line:
-```
-pip install MIDIFile
-```
-
-5\. Download and setup eSpeak:
+4\. Download and setup eSpeak:
 http://espeak.sourceforge.net/download.html
 
-6\. Download [lexconvert.py](https://github.com/ssb22/lexconvert/raw/master/lexconvert.py) ([documentation](https://ssb22.user.srcf.net/gradint/lexconvert.html)).
-Move it into the same directory as this project (E.g. into the MIDI2DECTalk directory created when you extracted the zip file).
+This is needed for the lexconvert module, which translates natural language into DECTalk phonemes
+
+5\. Download dependencies
+```
+pip install -r requirements.txt
+```
 
 
 # Usage
