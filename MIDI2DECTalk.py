@@ -89,6 +89,7 @@ MIDI_DECTALK_PITCH_DELTA = 35
 UNUSED = -1
 NOTE_ON = 144
 NOTE_OFF = 80
+END_OF_TRACK = 255
 
 
 # ==== TYPES ====
@@ -294,6 +295,10 @@ def get_event_type(event) -> int:
 
 	if event.header in (NOTE_OFF, NOTE_ON):
 		return event.header
+
+	if event.header == END_OF_TRACK:
+		# Treat the end of the track as a note off event
+		return NOTE_OFF
 
 	return UNUSED
 
