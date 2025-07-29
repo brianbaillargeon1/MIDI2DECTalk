@@ -525,7 +525,6 @@ def main():
 	if next_syllable_index < len(parsed_syllables):
 		error("There are more syllables than MIDI notes; output might be truncated")
 		error("Remaining syllables: " + str(parsed_syllables[next_syllable_index:]))
-		error("TODO: This is likely due to the absence of a note off")
 
 	# TODO: warn if the MIDI track ended with a lingering NOTE_ON (I.e. without a corresponding NOTE_OFF)
 
