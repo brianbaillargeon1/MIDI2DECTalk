@@ -68,6 +68,7 @@ TRACK_NUMBER = 0
 # Whether NOTE_OFF events should be handled regardless of whether their pitch corresponds to a sustained NOTE_ON event
 IGNORE_NOTE_OFF_PITCH = False
 
+
 # ==== CONSTANTS ====
 
 # Categorization of "dectalk" dictionary in lexconvert.py into vowels and consonants.
@@ -105,15 +106,20 @@ class Phoneme(NamedTuple):
 	phoneme: str
 	category: str
 
+
 class CategoryMatch(NamedTuple):
 	"""
-	A type used for parsing and categorizing phonemes
+	Used for parsing and categorizing phonemes.
+	phoneme: A phoneme that has been categorized
+	reminder: Phonemes that are yet to be categorized
 	"""
 	phoneme: Phoneme
 	remainder: str
 
+
 # Represents a list a Phonemes containing exactly one vowel
 Syllable = NewType('Syllable', list[Phoneme])
+
 
 # ==== FUNCTIONS ====
 
@@ -132,19 +138,20 @@ def error(message: str):
 	if PAUSE_ON_ERROR_DURATION:
 		time.sleep(PAUSE_ON_ERROR_DURATION)
 
-def split_on_category_match(phonemes: str, category: str, category_tokens: list[str], match_apostrophe: bool) -> Optional[CategoryMatch]:
+def find_category_match(phonemes: str, category: str, category_phonemes: list[str], match_apostrophe: bool) -> Optional[CategoryMatch]:
 	"""
-	Checks if phonemes starts with a token in the category list
+	Tests if the phonemes param starts with a member of the category_phonemes list; prepares a CategoryMatch accordingly if a match is found.
 	Params:
 	phonemes: an str like 'hxehl'ow, w'rrld'.
-	category: represents the category we're attempting to split on, E.g. Category.vowels, Category.consonants.
-	category_tokens: the list of possible tokens in the category, E.g. one of the constant lists VOWELS or CONSONANTS.
-	match_apostrophe: whether or not matching tokens might be prefixed with an apostrophe.
+	category: represents the category we're attempting to match on, E.g. Category.vowels, Category.consonants.
+	category_phonemes: the list of possible phonemes in the category, E.g. one of the constant lists VOWELS or CONSONANTS.
+	match_apostrophe: whether or not matching phonemes might be prefixed with an apostrophe.
 
 	Returns:
-	A tuple: (matching phoneme, phoneme list with the match removed)
-	E.g. ("hx", "ehl'ow, w'rrld")
-	If no category match, returns None
+	A CategoryMatch whose 'phoneme' is a match from the category_phonemes list, and the 'remainder' is the phonemes param with the match removed.
+	If the phonemes param does not start with any elements in category_phonemes, returns None.
+	E.g. the first truthy result from "hxehl'ow, w'rrld" would be:
+	CategoryMatch(phoneme=Phoneme(phoneme="hx", category='C'), remainder="ehl'ow, w'rrld").
 	"""
 
 	remainder = phonemes
@@ -154,12 +161,12 @@ def split_on_category_match(phonemes: str, category: str, category_tokens: list[
 		match = '\''
 		remainder = phonemes[1:]
 
-	for token in category_tokens:
-		if remainder.startswith(token):
-			match = match + token
-			remainder = remainder[len(token):]
-			phoneme = Phoneme(match, category)
-			return CategoryMatch(phoneme, remainder)
+	for category_phoneme in category_phonemes:
+		if remainder.startswith(category_phoneme):
+			match = match + category_phoneme
+			remainder = remainder[len(category_phoneme):]
+			match_phoneme = Phoneme(match, category)
+			return CategoryMatch(match_phoneme, remainder)
 	return None
 
 def categorize_phonemes(phonemes: str) -> list[Phoneme]:
@@ -178,11 +185,11 @@ def categorize_phonemes(phonemes: str) -> list[Phoneme]:
 	category_match = None
 
 	while unparsed:
-		category_match = split_on_category_match(unparsed, Category.vowel, VOWELS, True)
+		category_match = find_category_match(unparsed, Category.vowel, VOWELS, True)
 		if not category_match:
-			category_match = split_on_category_match(unparsed, Category.consonant, CONSONANTS, False)
+			category_match = find_category_match(unparsed, Category.consonant, CONSONANTS, False)
 		if not category_match:
-			category_match = split_on_category_match(unparsed, Category.comma, [", "], False)
+			category_match = find_category_match(unparsed, Category.comma, [", "], False)
 
 		if category_match:
 			categorized_phonemes.append(category_match.phoneme)
