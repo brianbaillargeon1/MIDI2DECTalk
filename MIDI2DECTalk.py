@@ -200,7 +200,7 @@ def categorize_phonemes(phonemes: str) -> list[Phoneme]:
 
 	return categorized_phonemes
 
-def parse_phonemes(phonemes: str) -> list[Syllable]:
+def parse_syllables(phonemes: str) -> list[Syllable]:
 	"""
 	Parses the param 'phonemes', an str like 'hxehl'ow, w'rrld',
 	and returns a list of Syllables.
@@ -438,7 +438,7 @@ def main():
 
 
 	# Convert the phonemes into a list of syllables
-	parsed_syllables = parse_phonemes(lex_convert_phonemes)
+	parsed_syllables = parse_syllables(lex_convert_phonemes)
 
 
 	# Read the MIDI file, and parse the MIDI track whose events will be iterated
