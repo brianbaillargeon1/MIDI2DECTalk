@@ -11,6 +11,7 @@ Main program; for details, see README.md
 
 # lexconvert.py and eSpeak, see README.md
 
+from inspect import cleandoc
 import math
 import MIDI # type: ignore
 import os
@@ -64,11 +65,8 @@ WRITE_PHONEME_ON = False
 # Track number in the MIDI file to use
 TRACK_NUMBER = 0
 
-# Whether to treat NOTE_ON with velocity 0 as NOTE_OFF
-VEL_ZERO_IS_NOTE_OFF = False
-
 # Whether NOTE_OFF events should be handled regardless of whether their pitch corresponds to a sustained NOTE_ON event
-IGNORE_NOTE_OFF_PITCH = True
+IGNORE_NOTE_OFF_PITCH = False
 
 # ==== CONSTANTS ====
 
@@ -290,7 +288,7 @@ def get_event_type(event) -> int:
 	NOTE_ON with velocity 0 returns NOTE_OFF.
 	Returns NOTE_ON, NOTE_OFF, or UNUSED
 	"""
-	if VEL_ZERO_IS_NOTE_OFF and event.header == NOTE_ON and event.message.velocity == 0:
+	if event.header == NOTE_ON and event.message.velocity == 0:
 		return NOTE_OFF
 
 	if event.header in (NOTE_OFF, NOTE_ON):
@@ -364,9 +362,15 @@ def translate_syllable_to_dectalk(syllable: Syllable, note: MIDI.Events.messages
 
 	vowel_duration = duration - total_consonant_duration
 	if vowel_duration < 0:
-		error("Could not fit all the phonemes within " + str(duration) + " milliseconds.")
-		error("Consider reducing DEFAULT_CONSONANT_DURATION, or ensure your MIDI notes are sufficiently long.")
-		#TODO: Call a cleanup method to close all the files
+		error(
+			cleandoc(f"""Could not fit all the phonemes within {duration} milliseconds.
+				Consider reducing DEFAULT_CONSONANT_DURATION, or ensure your MIDI notes are sufficiently long.
+				Impacted note:
+				{note}
+				Impacted syllable:
+				{syllable}"""
+			)
+		)
 		sys.exit()
 
 	for phoneme in syllable:
@@ -444,7 +448,6 @@ def main():
 		info("Multiple tracks detected; only the first track will be used")
 	elif TRACK_NUMBER >= len(midi_in):
 		error("The configured TRACK_NUMBER exceeds the highest track number in the MIDI file")
-		# TODO: cleanup
 		sys.exit()
 
 	track = midi_in[TRACK_NUMBER]
@@ -510,6 +513,9 @@ def main():
 
 			sustained_entity = event.message.note
 		elif event_type == NOTE_OFF and sustained_entity:
+			if sustained_entity == REST:
+				continue
+
 			if IGNORE_NOTE_OFF_PITCH or (sustained_entity.note == event.message.note.note and sustained_entity.octave == event.message.note.octave):
 				# This NOTE_OFF event ends sustained_entity. Write the entity, then begin a rest.
 				event_time_millis = get_event_time_millis(event, tempo, ticks_per_beat, first_note_ticks)
